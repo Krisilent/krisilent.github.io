@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Kris的博客</title>
+  
+  
+  <link href="http://krisilent.github.io/atom.xml" rel="self"/>
+  
+  <link href="http://krisilent.github.io/"/>
+  <updated>2020-09-27T09:29:18.414Z</updated>
+  <id>http://krisilent.github.io/</id>
+  
+  <author>
+    <name>Kris</name>
+    
+  </author>
+  
+  <generator uri="https://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title>Selenium反反爬</title>
+    <link href="http://krisilent.github.io/2020/09/27/Selenium%E5%8F%8D%E5%8F%8D%E7%88%AC/"/>
+    <id>http://krisilent.github.io/2020/09/27/Selenium%E5%8F%8D%E5%8F%8D%E7%88%AC/</id>
+    <published>2020-09-27T09:08:05.000Z</published>
+    <updated>2020-09-27T09:29:18.414Z</updated>
+    
+    <content type="html"><![CDATA[<h3 id="反爬"><a href="#反爬" class="headerlink" title="反爬"></a>反爬</h3><a id="more"></a><p>有时候，我们利用 Selenium 自动化爬取某些网站时，极有可能会遭遇反爬。</p><p>实际上，我们使用默认的方式初始化 WebDriver 打开一个网站，下面这段 JS 代码永远为 true，而手动打开目标网站的话，则为：undefined</p><figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"># 通过这段 JS 脚本区分是爬虫还是人工操作</span><br><span class="line">window.navigator.webdriver </span><br></pre></td></tr></table></figure><p>稍微有一点反爬经验的工程师利用上面的差别，很容易判断访问对象是否为一个爬虫，然后对其做反爬处理，返回一堆脏数据或各种验证码。<br>如果要实现后面的自动化操作，首先要解决的就是这个反爬的问题。</p><p>常见的反反爬方案包含：设置参数 excludeSwitches、mitmproxy 拦截过滤、cdp 命令，下面分别来说说。</p><h3 id="设置参数-excludeSwitches"><a href="#设置参数-excludeSwitches" class="headerlink" title="设置参数 excludeSwitches"></a>设置参数 excludeSwitches</h3><p>Chrome79 之前可以通过配置 ChromeOptions 驱动参数，来达到反反爬的目的。</p><p>只需要将参数打开，设置 excludeSwitches 值为 enable-automation 即可。</p><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">from</span> selenium.webdriver <span class="keyword">import</span> Chrome</span><br><span class="line"><span class="keyword">from</span> selenium.webdriver <span class="keyword">import</span> ChromeOptions</span><br><span class="line"></span><br><span class="line">option = ChromeOptions()</span><br><span class="line"></span><br><span class="line"><span class="comment"># 打开参数</span></span><br><span class="line">option.add_experimental_option(<span class="string">&#x27;excludeSwitches&#x27;</span>, [<span class="string">&#x27;enable-automation&#x27;</span>])</span><br><span class="line"></span><br><span class="line">driver = Chrome(options=option)</span><br><span class="line"></span><br><span class="line">driver.implicitly_wait(<span class="number">10</span>)</span><br><span class="line"></span><br><span class="line">driver.get(<span class="string">&quot;http://www.google.com&quot;</span>)</span><br></pre></td></tr></table></figure><p>这个参数是实验性参数，所以右上角会提示：请停用开发者模式运行的扩展程序，不能点击停用。</p><p>这样，设置这个参数后：</p><p>window.navigator.webdriver 的值就变成 undefined 了。</p><h3 id="mitproxy-拦截"><a href="#mitproxy-拦截" class="headerlink" title="mitproxy 拦截"></a>mitproxy 拦截</h3><p>众所周知，mitproxy 可以拦截到网络请求，做其他处理，这里只需要进行 JS 代码注入即可。</p><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># 待执行的 JS 代码,修改 window.navigator.webdriver 的值</span></span><br><span class="line">js_exec = <span class="string">&#x27;Object.defineProperties(navigator,&#123;webdriver:&#123;get:() =&gt; false&#125;&#125;);&#x27;</span></span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="comment"># 重写 response，截获网络请求，js注入</span></span><br><span class="line"><span class="function"><span class="keyword">def</span> <span class="title">response</span>(<span class="params">slef,flow: mitmproxy.http.HTTPFlow</span>):</span></span><br><span class="line"><span class="keyword">if</span> <span class="string">&#x27;google&#x27;</span> <span class="keyword">in</span> flow.request.url:</span><br><span class="line">flow.response.text = js_exec + flow.response.text</span><br></pre></td></tr></table></figure><p>然后启动 mitmdump</p><figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"># 启动mitmproxy</span><br><span class="line">mitmdump -p 8888 -s 111.py </span><br></pre></td></tr></table></figure><p>最后，配置 ChromeOptions 指向 mitmdump代码即可。</p><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># 配置ChromeOptions</span></span><br><span class="line">option.add_argument(<span class="string">&quot;--proxy-server=http://127.0.0.1:8888&quot;</span>)</span><br></pre></td></tr></table></figure><h3 id="cdp-命令"><a href="#cdp-命令" class="headerlink" title="cdp 命令"></a>cdp 命令</h3><p>cdp 全称是：Chrome Devtools-Protocol</p><p>通过 addScriptToEvaluateOnNewDocument() 方法可以在页面还未加载之前，运行一段脚本。</p><p>如此，我们只需要提前设置：</p><p>window.navigator.webdriver 的值为 undefined 即可。</p><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">from</span> selenium.webdriver <span class="keyword">import</span> Chrome</span><br><span class="line"><span class="keyword">from</span> selenium.webdriver <span class="keyword">import</span> ChromeOptions</span><br><span class="line"></span><br><span class="line">option = ChromeOptions()</span><br><span class="line"></span><br><span class="line"><span class="comment"># 打开参数</span></span><br><span class="line"><span class="comment"># option.add_argument(&quot;--proxy-server=http://127.0.0.1:8888&quot;)</span></span><br><span class="line"><span class="comment"># driver = Chrome(options=option)</span></span><br><span class="line"></span><br><span class="line">driver = Chrome()</span><br><span class="line">driver.execute_cdp_cmd(<span class="string">&quot;Page.addScriptToEvaluateOnNewDocument&quot;</span>, &#123;</span><br><span class="line">  <span class="string">&quot;source&quot;</span>: <span class="string">&quot;&quot;&quot;</span></span><br><span class="line"><span class="string">    Object.defineProperty(navigator, &#x27;webdriver&#x27;, &#123;</span></span><br><span class="line"><span class="string">      get: () =&gt; undefined</span></span><br><span class="line"><span class="string">    &#125;)</span></span><br><span class="line"><span class="string">  &quot;&quot;&quot;</span></span><br><span class="line">&#125;)</span><br><span class="line"></span><br><span class="line">driver.implicitly_wait(<span class="number">10</span>)</span><br><span class="line">driver.get(<span class="string">&quot;http://www.google.com&quot;</span>)</span><br></pre></td></tr></table></figure><h3 id="其他"><a href="#其他" class="headerlink" title="其他"></a>其他</h3><p>通过上面的 3 种方法可以很好的解决 Selenium 自动化被反爬的问题。</p>]]></content>
+    
+    
+    <summary type="html">&lt;h3 id=&quot;反爬&quot;&gt;&lt;a href=&quot;#反爬&quot; class=&quot;headerlink&quot; title=&quot;反爬&quot;&gt;&lt;/a&gt;反爬&lt;/h3&gt;</summary>
+    
+    
+    
+    <category term="爬虫" scheme="http://krisilent.github.io/categories/%E7%88%AC%E8%99%AB/"/>
+    
+    
+  </entry>
+  
+  <entry>
+    <title>安全资讯</title>
+    <link href="http://krisilent.github.io/2020/09/16/%E5%AE%89%E5%85%A8%E8%B5%84%E8%AE%AF/"/>
+    <id>http://krisilent.github.io/2020/09/16/%E5%AE%89%E5%85%A8%E8%B5%84%E8%AE%AF/</id>
+    <published>2020-09-16T01:30:54.000Z</published>
+    <updated>2020-09-16T01:42:53.422Z</updated>
+    
+    <content type="html"><![CDATA[<ol><li><a href="https://blog.netlab.360.com/">netlab.360.com</a><a id="more"></a></li><li><a href="https://s.tencent.com/">腾讯安全</a></li><li><a href="https://paper.seebug.org/">Seebug洞悉漏洞</a></li><li><a href="https://unit42.paloaltonetworks.com/">Unit 42 - Latest Cyber Security Research | Palo Alto Networks</a></li><li><a href="https://threatconnect.com/">ThreatConnect | Intelligence-Driven Security Operations</a></li><li><a href="https://www.f5.com/">F5 | Secure application delivery</a></li><li><a href="https://www.anomali.com/">Intelligence-Driven CyberSecurity | Anomali</a></li><li><a href="https://blog.knownsec.com/">知道创宇</a></li></ol>]]></content>
+    
+    
+    <summary type="html">&lt;ol&gt;
+&lt;li&gt;&lt;a href=&quot;https://blog.netlab.360.com/&quot;&gt;netlab.360.com&lt;/a&gt;</summary>
+    
+    
+    
+    <category term="安全" scheme="http://krisilent.github.io/categories/%E5%AE%89%E5%85%A8/"/>
+    
+    
+  </entry>
+  
+  <entry>
+    <title>工具</title>
+    <link href="http://krisilent.github.io/2020/09/11/%E5%B7%A5%E5%85%B7/"/>
+    <id>http://krisilent.github.io/2020/09/11/%E5%B7%A5%E5%85%B7/</id>
+    <published>2020-09-11T05:08:10.000Z</published>
+    <updated>2020-09-18T08:55:33.379Z</updated>
+    
+    <content type="html"><![CDATA[<ol><li><p><a href="https://www.mdnice.com/">Markdown Nice</a></p><a id="more"></a><p>支持自定义样式的 Markdown 编辑器；<br>支持微信公众号、知乎和稀土掘金；</p></li><li><p><a href="https://bitwarden.com/">bitwarden</a><br>开源密码管理神器</p></li><li><p>3个备份工具</p></li></ol><ul><li>Git：版本控制工具，Git+Markdown写作</li><li>Dropbox 云存储</li><li>Time Machine 时光机器</li></ul><ol start="4"><li>3个技术社区</li></ol><ul><li><a href="https://www.reddit.com/">reddit</a></li><li><a href="https://www.v2ex.com/">V2EX</a></li><li><a href="http://hackernews.cc/">Hacker News</a><br>提供最新国际威胁情报、黑客动向以及维基解密资讯。</li></ul><ol start="5"><li><a href="https://a-1.vip/exe">Ordinary下载器</a><br>一个免费下载软件的网站，有时候需要下载软件，不知道去哪找，很多网站存在钓鱼的现象，或者，从官网下载速度缓慢，可以在这个网站上下载，速度极快，而且软件来自正规渠道。</li></ol>]]></content>
+    
+    
+    <summary type="html">&lt;ol&gt;
+&lt;li&gt;&lt;p&gt;&lt;a href=&quot;https://www.mdnice.com/&quot;&gt;Markdown Nice&lt;/a&gt;&lt;/p&gt;</summary>
+    
+    
+    
+    <category term="安利" scheme="http://krisilent.github.io/categories/%E5%AE%89%E5%88%A9/"/>
+    
+    
+  </entry>
+  
+  <entry>
+    <title>普通人也能玩的爬虫工具</title>
+    <link href="http://krisilent.github.io/2020/09/11/%E6%99%AE%E9%80%9A%E4%BA%BA%E4%B9%9F%E8%83%BD%E7%8E%A9%E7%9A%84%E7%88%AC%E8%99%AB%E5%B7%A5%E5%85%B7/"/>
+    <id>http://krisilent.github.io/2020/09/11/%E6%99%AE%E9%80%9A%E4%BA%BA%E4%B9%9F%E8%83%BD%E7%8E%A9%E7%9A%84%E7%88%AC%E8%99%AB%E5%B7%A5%E5%85%B7/</id>
+    <published>2020-09-11T04:33:15.000Z</published>
+    <updated>2020-09-16T01:46:34.459Z</updated>
+    
+    <content type="html"><![CDATA[<h3 id="八爪鱼"><a href="#八爪鱼" class="headerlink" title="八爪鱼"></a><a href="https://www.bazhuayu.com/">八爪鱼</a></h3><a id="more"></a><p>八爪鱼优点：<br>1.提供了云端采集功能<br>2.第三方模板，方便快捷采集<br>3.10分钟搞定数据采集<br>4.对个人价格较贵</p><h3 id="集搜客"><a href="#集搜客" class="headerlink" title="集搜客"></a><a href="https://www.jisouke.com/">集搜客</a></h3><p>集搜客优点：<br>1.非常多网站模板<br>2.用浏览器方式采集，直接登录采集<br>3.付费版本提供了Mac版本<br>4.10分钟搞定数据采集<br>5.对个人用户便宜</p><h3 id="后羿采集器"><a href="#后羿采集器" class="headerlink" title="后羿采集器"></a><a href="http://www.houyicaiji.com/">后羿采集器</a></h3><p>后羿采集器优点：<br>1.浏览器模式采集<br>2.采集全程可视化<br>3.免费导出不用积分<br>4.完全免费支持Mac&amp;Linux版本<br>5.5分钟上手搞定数据抓取<br>6.对个人价格一般</p><p>这三款工具都很优秀，很好用，个人使用顺序集搜客&gt;后羿采集器&gt;八爪鱼</p>]]></content>
+    
+    
+    <summary type="html">&lt;h3 id=&quot;八爪鱼&quot;&gt;&lt;a href=&quot;#八爪鱼&quot; class=&quot;headerlink&quot; title=&quot;八爪鱼&quot;&gt;&lt;/a&gt;&lt;a href=&quot;https://www.bazhuayu.com/&quot;&gt;八爪鱼&lt;/a&gt;&lt;/h3&gt;</summary>
+    
+    
+    
+    <category term="爬虫" scheme="http://krisilent.github.io/categories/%E7%88%AC%E8%99%AB/"/>
+    
+    
+  </entry>
+  
+  <entry>
+    <title>docker命令</title>
+    <link href="http://krisilent.github.io/2020/09/10/docker%E5%91%BD%E4%BB%A4/"/>
+    <id>http://krisilent.github.io/2020/09/10/docker%E5%91%BD%E4%BB%A4/</id>
+    <published>2020-09-10T09:09:38.000Z</published>
+    <updated>2020-09-27T09:31:12.085Z</updated>
+    
+    <content type="html"><![CDATA[<h3 id="基本命令"><a href="#基本命令" class="headerlink" title="基本命令"></a>基本命令</h3><a id="more"></a><ol><li><p>启动docker服务<br>nohup dockerd  &gt; /dev/null &amp;</p></li><li><p>显示所有的容器<br>docker ps -a</p></li><li><p>列出所有运行中容器<br>docker ps</p></li><li><p>启动/停止某个容器<br>docker start/stop id/name</p></li><li><p>查看本地镜像<br>docker images </p></li><li><p>删除某个容器<br>docker rm id/name</p></li><li><p>删除某个镜像<br>docker rmi id/name</p></li><li><p>启动一个伪终端以交互式的方式进入某个容器<br>docker exec -ti id/name bash</p></li></ol><h3 id="封装docker"><a href="#封装docker" class="headerlink" title="封装docker"></a>封装docker</h3><ol><li>从容器创建一个新的镜像<br>docker commit 容器id sleep:v1</li><li>将指定镜像保存成 tar 归档文件<br>docker save -o sleep.tar sleep:v1</li></ol><h3 id="导入docker并启动"><a href="#导入docker并启动" class="headerlink" title="导入docker并启动"></a>导入docker并启动</h3><ol><li>导入使用 docker save 命令导出的镜像<br>docker load -i sleep.tar</li><li>启动容器<br>docker run -itd –name sleep –net host -v /root/sleep/:/root/sleep sleep:v1<br>启动容器 d参数后台运行，–net host映射宿主机 ，-v 目录映射</li></ol>]]></content>
+    
+    
+    <summary type="html">&lt;h3 id=&quot;基本命令&quot;&gt;&lt;a href=&quot;#基本命令&quot; class=&quot;headerlink&quot; title=&quot;基本命令&quot;&gt;&lt;/a&gt;基本命令&lt;/h3&gt;</summary>
+    
+    
+    
+    <category term="docker" scheme="http://krisilent.github.io/categories/docker/"/>
+    
+    
+  </entry>
+  
+  <entry>
+    <title>Python学习订阅站点</title>
+    <link href="http://krisilent.github.io/2020/09/10/Python%E5%AD%A6%E4%B9%A0%E8%AE%A2%E9%98%85%E7%AB%99%E7%82%B9/"/>
+    <id>http://krisilent.github.io/2020/09/10/Python%E5%AD%A6%E4%B9%A0%E8%AE%A2%E9%98%85%E7%AB%99%E7%82%B9/</id>
+    <published>2020-09-10T08:43:42.000Z</published>
+    <updated>2020-09-11T09:19:25.910Z</updated>
+    
+    <content type="html"><![CDATA[<ol><li><a href="https://pycoders.com/">pycoders</a><a id="more"></a></li><li><a href="https://www.pythonweekly.com/">pythonweekly</a></li><li><a href="https://realpython.com/">realpython</a></li><li><a href="https://planetpython.org/">Planet Python</a><br>搜集了非常多的Python相关的博客，其中有很多Python的核心开发者 如Georg Brandl、Nick Coghlan、Ajdavis、Benjamin Peterson、David Goodger等。首页也展示了很多有深度的、非常核心的文章。</li><li><a href="https://codingpy.com/">电子书下载</a></li><li><a href="https://segmentfault.com/t/python/blogs">segmentfault python</a></li></ol>]]></content>
+    
+    
+    <summary type="html">&lt;ol&gt;
+&lt;li&gt;&lt;a href=&quot;https://pycoders.com/&quot;&gt;pycoders&lt;/a&gt;</summary>
+    
+    
+    
+    <category term="安利" scheme="http://krisilent.github.io/categories/%E5%AE%89%E5%88%A9/"/>
+    
+    
+  </entry>
+  
+</feed>
